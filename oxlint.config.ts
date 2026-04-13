@@ -1,0 +1,40 @@
+import { defineConfig } from 'oxlint';
+
+export default defineConfig({
+  categories: {
+    correctness: 'error',
+    pedantic: 'off',
+    perf: 'warn',
+    restriction: 'error',
+    style: 'warn',
+    suspicious: 'warn',
+  },
+  ignorePatterns: ['dist/**', 'coverage/**', '.tmp-tsdown-*/**'],
+  options: {
+    reportUnusedDisableDirectives: 'warn',
+    typeAware: true,
+    typeCheck: true,
+  },
+  plugins: ['eslint', 'import', 'node', 'oxc', 'promise', 'typescript', 'unicorn'],
+  rules: {
+    'eslint/id-length': 'off',
+    'eslint/max-statements': 'off',
+    'eslint/no-await-in-loop': 'off',
+    'eslint/no-duplicate-imports': 'off',
+    'eslint/no-magic-numbers': 'off',
+    'eslint/no-ternary': 'off',
+    'eslint/no-undefined': 'off',
+    'eslint/sort-imports': 'off',
+    'import/group-exports': 'off',
+    'import/no-default-export': 'off',
+    'import/no-named-export': 'off',
+    'import/no-nodejs-modules': 'off',
+    'import/no-relative-parent-imports': 'off',
+    'import/prefer-default-export': 'off',
+    'oxc/no-async-await': 'off',
+    'oxc/no-optional-chaining': 'off',
+    'oxc/no-rest-spread-properties': 'off',
+    'typescript/explicit-function-return-type': 'off',
+    'typescript/prefer-readonly-parameter-types': 'off',
+  },
+});

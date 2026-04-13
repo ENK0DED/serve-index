@@ -1,0 +1,44 @@
+body {
+  margin: 0;
+  background: #f5f5f5;
+  color: #222;
+  font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+.directory {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 3rem;
+}
+
+h1 {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+}
+
+.listing {
+  overflow-x: auto;
+  padding: 1rem;
+  border: 1px solid #d8d8d8;
+  background: #fff;
+  line-height: 1.6;
+}
+
+.listing a {
+  color: #0b4f9c;
+  text-decoration: none;
+}
+
+.listing a:hover {
+  text-decoration: underline;
+}
+
+.icon {
+  color: #666;
+}
+
+address {
+  margin-top: 1rem;
+  color: #666;
+  font-style: normal;
+}

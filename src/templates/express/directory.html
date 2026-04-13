@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>listing directory {directory}</title>
+    <style nonce="{nonce}">
+      {style}
+    </style>
+    <script nonce="{nonce}">
+      document.addEventListener('DOMContentLoaded', function () {
+        var input = document.getElementById('search');
+        var files = document.getElementById('files');
+
+        input.addEventListener('keyup', function () {
+          var str = input.value.toLowerCase();
+          var links = files.querySelectorAll('a');
+
+          for (var i = 0; i < links.length; i++) {
+            var link = links[i];
+            var text = link.textContent.toLowerCase();
+            if (text === '..') continue;
+            if (str.length && text.indexOf(str) !== -1) {
+              link.classList.add('highlight');
+            } else {
+              link.classList.remove('highlight');
+            }
+          }
+        });
+      });
+    </script>
+  </head>
+  <body class="directory">
+    <input id="search" type="text" placeholder="Search" autocomplete="off" />
+    <div id="wrapper">
+      <h1><a href="/">~</a>{linked-path}</h1>
+      {files}
+    </div>
+  </body>
+</html>
