@@ -1,6 +1,6 @@
 {
   "name": "@enk0ded/serve-index",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Hono middleware for serving directory indexes and files",
   "keywords": [
     "directory-index",
@@ -13,10 +13,7 @@
     "url": "https://github.com/ENK0DED/serve-index/issues"
   },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ENK0DED/serve-index.git"
-  },
+  "repository": "https://github.com/ENK0DED/serve-index",
   "files": [
     "README.md",
     "LICENSE",
