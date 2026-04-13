@@ -242,4 +242,4 @@ The first npm release must be published manually by a package owner so the packa
 
 After that, add `.github/workflows/publish.yml` as a trusted publisher in the npm package settings for `@enk0ded/serve-index`.
 
-Once trusted publishing is configured, pushing a tag that matches `package.json` such as `v0.1.0` will run the publish workflow and produce provenance.
+Once trusted publishing is configured, pushing a tag that matches `package.json` such as `v1.2.3` will run the publish workflow and produce provenance.
