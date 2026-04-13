@@ -1,6 +1,6 @@
 {
   "name": "@enk0ded/serve-index",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Hono middleware for serving directory indexes and files",
   "keywords": [
     "directory-index",
@@ -58,6 +58,7 @@
     "@types/node": "^25.6.0",
     "oxfmt": "^0.45.0",
     "oxlint": "^1.60.0",
+    "oxlint-tsgolint": "^0.20.0",
     "tsdown": "^0.21.8",
     "typescript": "^6.0.2"
   },
