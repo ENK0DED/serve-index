@@ -4,55 +4,125 @@ import { formatFileDate } from '../../template-helpers.js';
 import type { File, RenderContext } from '../../types.js';
 import { escapeHtml } from '../../utils.js';
 
-const iconByExt: Record<string, string> = {
-  '.avi': '[VID]',
-  '.bin': '[BIN]',
-  '.bz2': '[ARC]',
-  '.csv': '[TXT]',
-  '.exe': '[BIN]',
-  '.gif': '[IMG]',
-  '.gz': '[ARC]',
-  '.htm': '[HTM]',
-  '.html': '[HTM]',
-  '.jpeg': '[IMG]',
-  '.jpg': '[IMG]',
-  '.json': '[CFG]',
-  '.md': '[TXT]',
-  '.mkv': '[VID]',
-  '.mp3': '[AUD]',
-  '.mp4': '[VID]',
-  '.ogg': '[AUD]',
-  '.pdf': '[PDF]',
-  '.png': '[IMG]',
-  '.svg': '[IMG]',
-  '.tar': '[ARC]',
-  '.txt': '[TXT]',
-  '.wav': '[AUD]',
-  '.webp': '[IMG]',
-  '.xml': '[CFG]',
-  '.xz': '[ARC]',
-  '.yaml': '[CFG]',
-  '.yml': '[CFG]',
-  '.zip': '[ARC]',
-};
-
-const formatSize = (size: number): string => {
-  const units = ['B', 'K', 'M', 'G', 'T'];
-  let value = size;
-  let unitIndex = 0;
-
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-
-  return unitIndex === 0 ? `${value}` : `${value < 10 ? value.toFixed(1) : Math.round(value)}${units[unitIndex]}`;
-};
+interface ApacheIcon {
+  altText?: string;
+  assetPath: string;
+}
 
 interface SortParams {
   column: string;
   order: 'A' | 'D';
 }
+
+const defaultNameWidth = 23;
+const versionCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const indexIgnorePatterns = ['.??*', '*~', '*#', 'HEADER*', 'README*', 'RCS', 'CVS', '*,v', '*,t'] as const;
+
+const defaultFileIcon: ApacheIcon = { assetPath: 'icons/unknown.gif' };
+
+const exactIconByName: Record<string, ApacheIcon> = {
+  README: { assetPath: 'icons/hand.right.gif' },
+  core: { assetPath: 'icons/bomb.gif' },
+};
+
+const iconByExt: Record<string, ApacheIcon> = {
+  '.Z': { assetPath: 'icons/compressed.gif' },
+  '.ai': { assetPath: 'icons/a.gif' },
+  '.bin': { assetPath: 'icons/binary.gif' },
+  '.c': { assetPath: 'icons/c.gif' },
+  '.conf': { assetPath: 'icons/script.gif' },
+  '.csh': { assetPath: 'icons/script.gif' },
+  '.dvi': { assetPath: 'icons/dvi.gif' },
+  '.eps': { assetPath: 'icons/a.gif' },
+  '.exe': { assetPath: 'icons/binary.gif' },
+  '.for': { assetPath: 'icons/f.gif' },
+  '.gz': { assetPath: 'icons/compressed.gif' },
+  '.hqx': { assetPath: 'icons/binhex.gif' },
+  '.htm': { assetPath: 'icons/layout.gif' },
+  '.html': { assetPath: 'icons/layout.gif' },
+  '.iv': { assetPath: 'icons/world2.gif' },
+  '.ksh': { assetPath: 'icons/script.gif' },
+  '.pdf': { assetPath: 'icons/layout.gif' },
+  '.pl': { assetPath: 'icons/p.gif' },
+  '.ps': { assetPath: 'icons/a.gif' },
+  '.py': { assetPath: 'icons/p.gif' },
+  '.sh': { assetPath: 'icons/script.gif' },
+  '.shar': { assetPath: 'icons/script.gif' },
+  '.shtml': { assetPath: 'icons/layout.gif' },
+  '.tar': { assetPath: 'icons/tar.gif' },
+  '.tcl': { assetPath: 'icons/script.gif' },
+  '.tex': { assetPath: 'icons/tex.gif' },
+  '.tgz': { assetPath: 'icons/compressed.gif' },
+  '.txt': { assetPath: 'icons/text.gif' },
+  '.uu': { assetPath: 'icons/uuencoded.gif' },
+  '.vrm': { assetPath: 'icons/world2.gif' },
+  '.vrml': { assetPath: 'icons/world2.gif' },
+  '.wrl': { assetPath: 'icons/world2.gif' },
+  '.z': { assetPath: 'icons/compressed.gif' },
+  '.zip': { assetPath: 'icons/compressed.gif' },
+};
+
+const compressedExts = new Set(['.bz2', '.gz', '.xz']);
+const imageExts = new Set(['.avif', '.bmp', '.gif', '.heic', '.jpeg', '.jpg', '.png', '.svg', '.tif', '.tiff', '.webp']);
+const audioExts = new Set(['.aac', '.flac', '.m4a', '.mp3', '.ogg', '.opus', '.wav']);
+const videoExts = new Set(['.avi', '.mkv', '.mov', '.mp4', '.mpeg', '.mpg', '.webm']);
+
+const globToRegExp = (pattern: string) =>
+  new RegExp(
+    `^${pattern
+      .replace(/[.+^${}()|[\]\\]/g, String.raw`\$&`)
+      .replaceAll('*', '.*')
+      .replaceAll('?', '.')}$`,
+  );
+
+const shouldIgnoreFile = (file: File): boolean => {
+  if (file.name === '..') {
+    return false;
+  }
+
+  return indexIgnorePatterns.some((pattern) => globToRegExp(pattern).test(file.name));
+};
+
+const formatApacheSize = (size: number): string => {
+  if (size < 0) {
+    return '  - ';
+  }
+  if (size < 973) {
+    return `${size.toString().padStart(3, ' ')} `;
+  }
+
+  const units = 'KMGTPE';
+  let value = size;
+
+  for (const unit of units) {
+    const remain = value % 1024;
+    value = Math.floor(value / 1024);
+
+    if (value < 973) {
+      if (value < 9 || (value === 9 && remain < 973)) {
+        let decimal = Math.floor((remain * 5 + 256) / 512);
+        let whole = value;
+        if (decimal >= 10) {
+          whole += 1;
+          decimal = 0;
+        }
+        return `${whole}.${decimal}${unit}`;
+      }
+
+      const whole = remain >= 512 ? value + 1 : value;
+      return `${whole.toString().padStart(3, ' ')}${unit}`;
+    }
+  }
+
+  return '****';
+};
+
+const truncateName = (name: string, width: number): string => {
+  if (name.length <= width) {
+    return name;
+  }
+  return `${name.slice(0, Math.max(0, width - 3))}..>`;
+};
 
 const parseSortParams = (queryString: string): SortParams => {
   const params = new URLSearchParams(queryString.replaceAll(';', '&'));
@@ -61,7 +131,7 @@ const parseSortParams = (queryString: string): SortParams => {
   return { column, order };
 };
 
-const compareFilePriority = (a: File, b: File) => {
+const compareParentPriority = (a: File, b: File) => {
   if (a.name === '..') {
     return -1;
   }
@@ -70,29 +140,27 @@ const compareFilePriority = (a: File, b: File) => {
     return 1;
   }
 
-  const aDir = a.stat?.isDirectory() ? 1 : 0;
-  const bDir = b.stat?.isDirectory() ? 1 : 0;
-  return aDir === bDir ? 0 : bDir - aDir;
+  return 0;
 };
+
+const compareByName = (a: File, b: File, multiplier: number) => versionCollator.compare(a.name, b.name) * multiplier;
 
 const compareByModifiedTime = (a: File, b: File, multiplier: number) => {
   const aTime = a.stat?.mtime.getTime() ?? 0;
   const bTime = b.stat?.mtime.getTime() ?? 0;
-  return (aTime - bTime) * multiplier || a.name.localeCompare(b.name);
+  return (aTime - bTime) * multiplier || compareByName(a, b, 1);
 };
 
 const compareBySize = (a: File, b: File, multiplier: number) => {
   const aSize = a.stat?.isDirectory() ? -1 : (a.stat?.size ?? 0);
   const bSize = b.stat?.isDirectory() ? -1 : (b.stat?.size ?? 0);
-  return (aSize - bSize) * multiplier || a.name.localeCompare(b.name);
+  return (aSize - bSize) * multiplier || compareByName(a, b, 1);
 };
 
-const compareByName = (a: File, b: File, multiplier: number) => a.name.toLocaleLowerCase().localeCompare(b.name.toLocaleLowerCase()) * multiplier;
-
 const compareSortedFiles = ({ a, b, column, multiplier }: { a: File; b: File; column: string; multiplier: number }) => {
-  const priority = compareFilePriority(a, b);
-  if (priority !== 0) {
-    return priority;
+  const parentPriority = compareParentPriority(a, b);
+  if (parentPriority !== 0) {
+    return parentPriority;
   }
 
   switch (column) {
@@ -114,47 +182,87 @@ const sortFiles = (files: File[], queryString: string): File[] => {
   return files.toSorted((a, b) => compareSortedFiles({ a, b, column, multiplier }));
 };
 
+const filterFiles = (files: File[]): File[] => files.filter((file) => !shouldIgnoreFile(file));
+
 const toggleOrder = (currentColumn: string, linkColumn: string, currentOrder: 'A' | 'D') => {
   const order = currentColumn === linkColumn && currentOrder === 'A' ? 'D' : 'A';
-  return `?C=${linkColumn}&O=${order}`;
+  return `?C=${linkColumn};O=${order}`;
 };
 
-const iconLabel = (file: File) => {
+const iconForFile = (file: File): ApacheIcon => {
   if (file.name === '..') {
-    return '[UP]';
+    return { altText: 'PARENTDIR', assetPath: 'icons/back.gif' };
   }
   if (file.stat?.isDirectory()) {
-    return '[DIR]';
+    return { altText: 'DIR', assetPath: 'icons/folder.gif' };
   }
-  return iconByExt[path.extname(file.name).toLowerCase()] ?? '[FILE]';
+
+  const exactIcon = exactIconByName[file.name];
+  if (exactIcon) {
+    return exactIcon;
+  }
+
+  const extension = path.extname(file.name);
+  const normalizedExtension = extension.toLowerCase();
+  if (iconByExt[extension]) {
+    return iconByExt[extension];
+  }
+  if (iconByExt[normalizedExtension]) {
+    return iconByExt[normalizedExtension];
+  }
+  if (compressedExts.has(normalizedExtension)) {
+    return { assetPath: 'icons/compressed.gif' };
+  }
+  if (imageExts.has(normalizedExtension)) {
+    return { altText: 'IMG', assetPath: 'icons/image2.gif' };
+  }
+  if (audioExts.has(normalizedExtension)) {
+    return { altText: 'SND', assetPath: 'icons/sound2.gif' };
+  }
+  if (videoExts.has(normalizedExtension)) {
+    return { altText: 'VID', assetPath: 'icons/movie.gif' };
+  }
+
+  return defaultFileIcon;
 };
+
+const formatAltText = (altText?: string) => `[${altText ?? '   '}]`;
+
+const renderIcon = (icon: ApacheIcon, context: RenderContext) =>
+  `<img src="${escapeHtml(context.templateAssetUrl(icon.assetPath))}" alt="${escapeHtml(formatAltText(icon.altText))}">`;
+
+const blankHeaderIcon = (context: RenderContext) => renderIcon({ altText: 'ICO', assetPath: 'icons/blank.gif' }, context);
 
 const renderFileList = function* renderFileList(files: File[], directory: string, context: RenderContext): Generator<string> {
   const { column, order } = parseSortParams(context.queryString);
-  yield (
-    `<span class="icon">ICON</span> <a href="${toggleOrder(column, 'N', order)}">Name</a>` +
-      `${' '.repeat(20)}<a href="${toggleOrder(column, 'M', order)}">Last modified</a>      <a href="${toggleOrder(column, 'S', order)}">Size</a>  <a href="${toggleOrder(column, 'D', order)}">Description</a><hr>`
+  const nameWidth = Math.max(
+    defaultNameWidth,
+    ...files.map((file) => (file.name === '..' ? 'Parent Directory'.length : (file.name + (file.stat?.isDirectory() ? '/' : '')).length)),
   );
 
+  yield '  <table>\n';
+  yield `   <tr><th valign="top">${blankHeaderIcon(context)}</th><th><a href="${toggleOrder(column, 'N', order)}">Name</a></th><th><a href="${toggleOrder(column, 'M', order)}">Last modified</a></th><th><a href="${toggleOrder(column, 'S', order)}">Size</a></th><th><a href="${toggleOrder(column, 'D', order)}">Description</a></th></tr>\n`;
+  yield '   <tr><th colspan="5"><hr></th></tr>\n';
+
   for (const file of files) {
-    const icon = iconLabel(file);
-    yield '\n';
+    const icon = iconForFile(file);
 
     if (file.name === '..') {
-      const parentHref = escapeHtml(directory.replace(/\/[^/]*\/?$/, '/'));
-      yield `<span class="icon">${icon}</span> <a href="${parentHref}">Parent Directory</a>${' '.repeat(29)}-`;
+      const href = escapeHtml(`${directory.endsWith('/') ? directory : `${directory}/`}../`);
+      const label = 'Parent Directory';
+      yield `<tr><td valign="top">${renderIcon(icon, context)}</td><td><a href="${href}">${label}</a>${' '.repeat(Math.max(0, nameWidth - label.length))}</td><td align="right">&nbsp;</td><td align="right">  - </td><td>&nbsp;</td></tr>\n`;
     } else {
-      const name = escapeHtml(file.name) + (file.stat?.isDirectory() ? '/' : '');
+      const fullName = file.name + (file.stat?.isDirectory() ? '/' : '');
+      const label = truncateName(fullName, nameWidth);
       const href = escapeHtml(encodeURIComponent(file.name) + (file.stat?.isDirectory() ? '/' : ''));
       const date = formatFileDate(file);
-      const size = file.stat && !file.stat.isDirectory() ? formatSize(file.stat.size) : '-';
-      const namePad = ' '.repeat(Math.max(1, 24 - name.length));
-      const sizePad = ' '.repeat(Math.max(1, 8 - size.length));
-      yield `<span class="icon">${icon}</span> <a href="${href}">${name}</a>${namePad}${date}${sizePad}${size}`;
+      const size = file.stat && !file.stat.isDirectory() ? formatApacheSize(file.stat.size) : '  - ';
+      yield `<tr><td valign="top">${renderIcon(icon, context)}</td><td><a href="${href}">${escapeHtml(label)}</a>${' '.repeat(Math.max(0, nameWidth - label.length))}</td><td align="right">${date}  </td><td align="right">${size}</td><td>&nbsp;</td></tr>\n`;
     }
   }
 
-  yield '\n<hr>';
+  yield '   <tr><th colspan="5"><hr></th></tr>\n';
+  yield '</table>';
 };
 
-export { renderFileList, sortFiles };
+export { filterFiles, renderFileList, sortFiles };

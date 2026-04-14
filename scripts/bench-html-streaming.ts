@@ -12,6 +12,7 @@ import type { File, PresetRenderer, RenderContext, TemplatePart } from '../src/t
 const textEncoder = new TextEncoder();
 const workspaceRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const templateRoot = path.join(workspaceRoot, 'src', 'templates');
+const benchmarkTemplateAssetUrl = (assetPath: string) => `?__serve_index_asset=${encodeURIComponent(assetPath)}`;
 
 interface BenchmarkFixture {
   directoryStat: NonNullable<File['stat']>;
@@ -75,6 +76,7 @@ const renderBuffered = (config: BenchmarkConfig, files: File[]): BenchmarkResult
     .replaceAll('{directory}', config.directory)
     .replaceAll('{linked-path}', config.directory)
     .replaceAll('{nonce}', 'bench')
+    .replaceAll('{signature}', 'Apache Server at example.test Port 80')
     .replaceAll('{host}', config.host);
   const elapsedMs = performance.now() - start;
 
@@ -94,6 +96,7 @@ const renderStreamed = (config: BenchmarkConfig, templateParts: TemplatePart[], 
     host: config.host,
     'linked-path': config.directory,
     nonce: 'bench',
+    signature: 'Apache Server at example.test Port 80',
     style: '',
   } as const;
 
@@ -170,21 +173,21 @@ const loadBenchmarkConfigs = async (): Promise<Record<string, BenchmarkConfig>> 
     apache: {
       directory: '/assets/nested/',
       host: 'example.test',
-      renderContext: { queryString: 'C=N;O=A', viewName: 'tiles' },
+      renderContext: { queryString: 'C=N;O=A', templateAssetUrl: benchmarkTemplateAssetUrl, viewName: 'tiles' },
       renderer: renderApacheList,
       templateContent: apacheTemplate,
     },
     express: {
       directory: '/assets/nested/',
       host: 'example.test',
-      renderContext: { queryString: '', viewName: 'details' },
+      renderContext: { queryString: '', templateAssetUrl: benchmarkTemplateAssetUrl, viewName: 'details' },
       renderer: renderExpressList,
       templateContent: expressTemplate,
     },
     nginx: {
       directory: '/assets/nested/',
       host: 'example.test',
-      renderContext: { queryString: '', viewName: 'tiles' },
+      renderContext: { queryString: '', templateAssetUrl: benchmarkTemplateAssetUrl, viewName: 'tiles' },
       renderer: renderNginxList,
       templateContent: nginxTemplate,
     },

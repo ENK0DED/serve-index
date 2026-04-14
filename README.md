@@ -115,7 +115,7 @@ app.use('*', serveIndex('./public'));
 
 Three built-in HTML presets are available:
 
-- `express`: familiar icon-based listing with `tiles` and `details` views
+- `express`: matches the default Express `serve-index` listing with `tiles` and `details` views
 - `nginx`: plain index-style output
 - `apache`: Apache-style table with sortable query parameters
 
@@ -134,6 +134,7 @@ Set `template` to the path of an HTML file. The file can use these placeholders:
 - `{host}`
 - `{linked-path}`
 - `{nonce}`
+- `{signature}`
 - `{style}`
 
 Example:
@@ -177,7 +178,11 @@ Template functions receive:
 - `locals.nonce`
 - `locals.path`
 - `locals.renderContext`
+- `locals.signature`
 - `locals.style`
+- `locals.templateAssetUrl(assetPath)`
+
+`locals.templateAssetUrl()` returns a URL for preset-local static assets such as icons. During build, every non-TypeScript file under `src/templates/*` is copied into `dist/templates/*`, so preset assets continue to work after publishing.
 
 Template functions return trusted HTML. If you include filenames, query values, or other user-controlled content, you are responsible for escaping it safely.
 

@@ -8,7 +8,7 @@ import type { DirectoryRenderOptions } from './directory-listing.js';
 import { handleDirectoryRender } from './directory-listing.js';
 import { handleFileResponse } from './file-response.js';
 import { PathEscapeError, hasHiddenPathSegment, hasHiddenResolvedPath, isContainedPath, resolveContainedPath } from './path-security.js';
-import { resolvePreset } from './template.js';
+import { normalizeTemplateAssetPath, resolvePreset } from './template.js';
 import type { ServeIndexOptions, ServeIndexPreset } from './types.js';
 import { getErrorCode } from './utils.js';
 
@@ -65,6 +65,28 @@ const handleResolvedRequest = async (renderOptions: DirectoryRenderOptions): Pro
   return handleDirectoryRender(renderOptions);
 };
 
+const handleTemplateAssetRequest = async ({
+  c,
+  directory,
+  resolvedPreset,
+}: {
+  c: DirectoryRenderOptions['c'];
+  directory: string;
+  resolvedPreset: DirectoryRenderOptions['resolvedPreset'];
+}): Promise<Response | undefined> => {
+  const normalizedAssetPath = normalizeTemplateAssetPath(directory.replace(/^\/+/, ''));
+  if (!normalizedAssetPath || !normalizedAssetPath.startsWith('icons/')) {
+    return undefined;
+  }
+
+  const resolvedAsset = await resolvedPreset.resolveAsset(normalizedAssetPath);
+  if (!resolvedAsset) {
+    throw new HTTPException(404);
+  }
+
+  return handleFileResponse(c, resolvedAsset.filePath, resolvedAsset.stats);
+};
+
 const handleMiddlewareError = async (error: unknown, next: () => Promise<void>) => {
   if (error instanceof HTTPException) {
     throw error;
@@ -109,15 +131,25 @@ export const serveIndex = (root: string, options: ServeIndexOptions = {}): Retur
       return next();
     }
 
-    const [rootRealPath, resolvedPreset] = await Promise.all([resolvedRootPromise, resolvedPresetPromise]);
-
     const url = new URL(c.req.url);
     const displayDirectory = decodePathname(url.pathname);
     if (displayDirectory === undefined) {
       throw new HTTPException(400);
     }
 
+    const resolvedPreset = await resolvedPresetPromise;
     const directory = rewriteRequestPath ? (rewriteRequestPath(displayDirectory) ?? displayDirectory) : displayDirectory;
+
+    try {
+      const assetResponse = await handleTemplateAssetRequest({ c, directory, resolvedPreset });
+      if (assetResponse) {
+        return assetResponse;
+      }
+    } catch (error) {
+      return handleMiddlewareError(error, next);
+    }
+
+    const rootRealPath = await resolvedRootPromise;
     const requestedPath = validateRequestedPath(directory, Boolean(options.hidden), rootRealPath);
 
     try {

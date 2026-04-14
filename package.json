@@ -1,6 +1,6 @@
 {
   "name": "@enk0ded/serve-index",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Hono middleware for serving directory indexes and files",
   "keywords": [
     "directory-index",
@@ -34,7 +34,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
-    "build": "tsdown --config tsdown.config.ts",
+    "build": "tsdown --config tsdown.config.ts && bun run scripts/build-template-assets.ts",
     "smoke:node": "node --input-type=module -e \"import('./dist/index.js').then((mod) => { if (typeof mod.serveIndex !== 'function') { throw new TypeError('serveIndex export missing'); } })\"",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",

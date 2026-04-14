@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -532,14 +532,34 @@ describe('@enk0ded/serve-index', () => {
 
     expect(expressResponse.status).toBe(200);
     expect(expressBody).toContain('title=".."');
-    expect(expressBody).toContain('href="/assets/"');
+    expect(expressBody).toContain('href="/assets"');
 
     const nginxApp = new Hono();
     nginxApp.use('/assets/*', mountServeIndex(root, { preset: 'nginx' }));
     const nginxResponse = await nginxApp.request('http://example.test/assets/nested/', { headers: { Accept: 'text/html' } });
 
     expect(nginxResponse.status).toBe(200);
-    expect(await nginxResponse.text()).toContain('<a href="../">..</a>');
+    expect(await nginxResponse.text()).toContain('<a href="../">../</a>');
+  });
+
+  test('matches express serve-index html formatting', async () => {
+    const root = await makeTempDir();
+    cleanupDirs.push(root);
+    await mkdir(path.join(root, 'nested'), { recursive: true });
+    await writeFile(path.join(root, 'alpha.txt'), 'hello world');
+
+    const app = new Hono();
+    app.use('/assets/*', mountServeIndex(root));
+
+    const response = await app.request('http://example.test/assets/', { headers: { Accept: 'text/html' } });
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('<!DOCTYPE html>');
+    expect(body).toContain('maximum-scale=1.0, user-scalable=no');
+    expect(body).not.toContain('nonce=');
+    expect(body).toContain('<h1><a href="/">~</a> / <a href="/assets">assets</a> / </h1>');
+    expect(body).toContain('<a href="/assets/nested" class="" title="nested">');
   });
 
   test('loads the nginx preset without missing assets', async () => {
@@ -554,6 +574,47 @@ describe('@enk0ded/serve-index', () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('Index of /assets/');
+  });
+
+  test('matches nginx autoindex html formatting', async () => {
+    const root = await makeTempDir();
+    cleanupDirs.push(root);
+
+    const nestedPath = path.join(root, 'nested');
+    const longName = '012345678901234567890123456789012345678901234567890123456789.txt';
+    const specialName = 'A space & symbols <here>.txt';
+    const fixedDate = new Date(Date.UTC(2024, 0, 2, 3, 4, 5));
+
+    await mkdir(nestedPath, { recursive: true });
+    await writeFile(path.join(root, longName), 'x');
+    await writeFile(path.join(root, specialName), 'x');
+    await writeFile(path.join(root, 'alpha.txt'), 'x');
+    await utimes(nestedPath, fixedDate, fixedDate);
+    await utimes(path.join(root, longName), fixedDate, fixedDate);
+    await utimes(path.join(root, specialName), fixedDate, fixedDate);
+    await utimes(path.join(root, 'alpha.txt'), fixedDate, fixedDate);
+
+    const app = new Hono();
+    app.use('/assets/*', mountServeIndex(root, { preset: 'nginx' }));
+
+    const response = await app.request('http://example.test/assets/', { headers: { Accept: 'text/html' } });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(
+      [
+        '<html>',
+        '<head><title>Index of /assets/</title></head>',
+        '<body>',
+        '<h1>Index of /assets/</h1><hr><pre><a href="../">../</a>',
+        '<a href="nested/">nested/</a>                                            02-Jan-2024 03:04                   -',
+        `<a href="${encodeURIComponent(longName)}">01234567890123456789012345678901234567890123456..&gt;</a> 02-Jan-2024 03:04                   1`,
+        `<a href="${encodeURIComponent(specialName)}">A space &amp; symbols &lt;here&gt;.txt</a>                       02-Jan-2024 03:04                   1`,
+        '<a href="alpha.txt">alpha.txt</a>                                          02-Jan-2024 03:04                   1',
+        '</pre><hr></body>',
+        '</html>',
+        '',
+      ].join('\r\n'),
+    );
   });
 
   test('rejects special files instead of streaming them', async () => {
@@ -653,9 +714,101 @@ describe('@enk0ded/serve-index', () => {
     expect(body).toContain('alpha.txt');
     expect(body).toContain('beta.txt');
     expect(body).toContain('Parent Directory');
-    expect(body).toContain('?C=N&O=');
-    expect(body).toContain('?C=M&O=');
-    expect(body).toContain('?C=S&O=');
+    expect(body).toContain('?C=N;O=');
+    expect(body).toContain('?C=M;O=');
+    expect(body).toContain('?C=S;O=');
+    expect(body).toContain('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"');
+    expect(body).toContain('<table>');
+    expect(body).not.toContain('<address>');
+  });
+
+  test('serves apache preset icon assets from listing markup', async () => {
+    const root = await makeTempDir();
+    cleanupDirs.push(root);
+    await mkdir(path.join(root, 'nested'), { recursive: true });
+    await writeFile(path.join(root, 'nested', 'alpha.txt'), 'aaa');
+
+    const app = new Hono();
+    app.use('/assets/*', mountServeIndex(root, { preset: 'apache' }));
+
+    const listingResponse = await app.request('http://example.test/assets/nested/', { headers: { Accept: 'text/html' } });
+    expect(listingResponse.status).toBe(200);
+
+    const body = await listingResponse.text();
+    const iconUrl = requireHeader(/src="([^"]*\/assets\/icons\/[^"]+)"/.exec(body)?.[1], 'apache icon url');
+    const assetResponse = await app.request(`http://example.test${iconUrl}`);
+    const assetBytes = await assetResponse.arrayBuffer();
+
+    expect(assetResponse.status).toBe(200);
+    expect(assetResponse.headers.get('content-type')).toBe('image/gif');
+    expect(requireHeader(assetResponse.headers.get('etag'), 'apache icon etag')).toMatch(/^W\//);
+    expect(assetBytes.byteLength).toBeGreaterThan(0);
+  });
+
+  test('template functions can link preset-local assets', async () => {
+    const root = await makeTempDir();
+    cleanupDirs.push(root);
+    await writeFile(path.join(root, 'alpha.txt'), 'aaa');
+
+    const app = new Hono();
+    app.use(
+      '/assets/*',
+      mountServeIndex(root, {
+        preset: 'apache',
+        template: (locals) => `<img src="${locals.templateAssetUrl('icons/blank.gif')}" alt="template asset" />`,
+      }),
+    );
+
+    const listingResponse = await app.request('http://example.test/assets/', { headers: { Accept: 'text/html' } });
+    expect(listingResponse.status).toBe(200);
+
+    const body = await listingResponse.text();
+    const iconUrl = requireHeader(/src="([^"]*\/assets\/icons\/[^"]+)"/.exec(body)?.[1], 'template asset url');
+    const assetResponse = await app.request(`http://example.test${iconUrl}`);
+
+    expect(assetResponse.status).toBe(200);
+    expect(assetResponse.headers.get('content-type')).toBe('image/gif');
+  });
+
+  test('apache preset matches Apache index ignore behavior and PDF icon mapping', async () => {
+    const root = await makeTempDir();
+    cleanupDirs.push(root);
+    await writeFile(path.join(root, 'README'), 'read me');
+    await writeFile(path.join(root, 'manual.pdf'), 'pdf-ish');
+
+    const app = new Hono();
+    app.use('/assets/*', mountServeIndex(root, { preset: 'apache' }));
+
+    const response = await app.request('http://example.test/assets/', { headers: { Accept: 'text/html' } });
+    expect(response.status).toBe(200);
+
+    const body = await response.text();
+    expect(body).not.toContain('README');
+    expect(body).toContain('/assets/icons/layout.gif');
+    expect(body).toContain('alt="[   ]"');
+  });
+
+  test('apache preset emits Apache-style alt text for parent, directory, and type icons', async () => {
+    const root = await makeTempDir();
+    cleanupDirs.push(root);
+    await mkdir(path.join(root, 'nested', 'child'), { recursive: true });
+    await writeFile(path.join(root, 'nested', 'photo.png'), 'png-ish');
+
+    const app = new Hono();
+    app.use('/assets/*', mountServeIndex(root, { preset: 'apache' }));
+
+    const response = await app.request('http://example.test/assets/nested/', { headers: { Accept: 'text/html' } });
+    expect(response.status).toBe(200);
+
+    const body = await response.text();
+    expect(body).toContain('/assets/icons/back.gif');
+    expect(body).toContain('alt="[PARENTDIR]"');
+    expect(body).toContain('/assets/icons/folder.gif');
+    expect(body).toContain('alt="[DIR]"');
+    expect(body).toContain('/assets/icons/image2.gif');
+    expect(body).toContain('alt="[IMG]"');
+    expect(body).toContain('alt="[ICO]"');
+    expect(body).toContain('href="/assets/nested/../"');
   });
 
   test('apache preset sort links round-trip with standard query separators', async () => {
@@ -671,7 +824,7 @@ describe('@enk0ded/serve-index', () => {
     expect(initial.status).toBe(200);
 
     const initialBody = await initial.text();
-    const sizeSortLink = requireHeader(/href="(\?C=S&O=[AD])"/.exec(initialBody)?.[1], 'apache size sort link');
+    const sizeSortLink = requireHeader(/href="(\?C=S;O=[AD])"/.exec(initialBody)?.[1], 'apache size sort link');
 
     const response = await app.request(`http://example.test/assets/${sizeSortLink}`, { headers: { Accept: 'text/html' } });
     expect(response.status).toBe(200);

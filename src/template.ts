@@ -1,15 +1,28 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { Locals, PresetModule, PresetRenderer, ResolvedTemplate, ServeIndexOptions, ServeIndexPreset, TemplatePart, TemplatePartName } from './types.js';
+import { resolveContainedPath } from './path-security.js';
+import type {
+  Locals,
+  PresetModule,
+  PresetRenderer,
+  ResolvedTemplate,
+  ResolvedTemplateAsset,
+  ServeIndexOptions,
+  ServeIndexPreset,
+  TemplatePart,
+  TemplatePartName,
+} from './types.js';
 import { escapeHtml, getErrorCode } from './utils.js';
 
 const currentModuleDirectory = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
-const templatePlaceholderPattern = /\{(directory|files|host|linked-path|nonce|style)\}/g;
+const templatePlaceholderPattern = /\{(directory|files|host|linked-path|nonce|signature|style)\}/g;
 const textEncoder = new TextEncoder();
 
 const base64Pattern = /^[A-Za-z0-9+/=]+$/;
+const templateAssetQueryKey = '__serve_index_asset';
+const disallowedTemplateAssetExtensions = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.map']);
 
 const generateNonce = (): string => {
   const bytes = new Uint8Array(18);
@@ -33,8 +46,63 @@ const buildCspValue = (nonce: string): string => {
   return `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; img-src 'self'`;
 };
 
+const expressStyleCspValue = `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data:`;
+
+const normalizeTemplateAssetPath = (assetPath: string): string | undefined => {
+  const trimmedPath = assetPath.replaceAll('\\', '/').replace(/^\/+/, '');
+  if (!trimmedPath) {
+    return undefined;
+  }
+
+  const normalizedPath = path.posix.normalize(trimmedPath);
+  if (normalizedPath === '.' || normalizedPath === '..' || normalizedPath.startsWith('../')) {
+    return undefined;
+  }
+
+  return normalizedPath;
+};
+
+const isDisallowedTemplateAssetPath = (assetPath: string): boolean => {
+  const basename = path.posix.basename(assetPath).toLowerCase();
+  return basename.endsWith('.d.ts') || disallowedTemplateAssetExtensions.has(path.posix.extname(basename));
+};
+
+const createTemplateAssetUrl = (assetPath: string, assetBasePath = '/'): string => {
+  const normalizedPath = normalizeTemplateAssetPath(assetPath);
+  if (!normalizedPath) {
+    throw new TypeError('Invalid template asset path');
+  }
+
+  const normalizedBasePath = assetBasePath.endsWith('/') ? assetBasePath : `${assetBasePath}/`;
+  return `${normalizedBasePath}${normalizedPath}`.replace(/\/{2,}/g, '/');
+};
+
+const resolveTemplateAsset = async (templateDirectory: string, assetPath: string): Promise<ResolvedTemplateAsset | undefined> => {
+  const normalizedPath = normalizeTemplateAssetPath(assetPath);
+  if (!normalizedPath || isDisallowedTemplateAssetPath(normalizedPath)) {
+    return undefined;
+  }
+
+  try {
+    const resolvedPath = await resolveContainedPath(templateDirectory, path.join(templateDirectory, normalizedPath));
+    const stats = await stat(resolvedPath);
+    if (!stats.isFile()) {
+      return undefined;
+    }
+
+    return { filePath: resolvedPath, stats };
+  } catch (error) {
+    const code = getErrorCode(error);
+    if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') {
+      return undefined;
+    }
+
+    throw error;
+  }
+};
+
 const isTemplatePartName = (value: string): value is TemplatePartName =>
-  value === 'directory' || value === 'files' || value === 'host' || value === 'linked-path' || value === 'nonce' || value === 'style';
+  value === 'directory' || value === 'files' || value === 'host' || value === 'linked-path' || value === 'nonce' || value === 'signature' || value === 'style';
 
 const presetLoaders: Record<ServeIndexPreset, () => Promise<PresetModule>> = {
   apache: async () => import('./templates/apache/index.js'),
@@ -81,14 +149,14 @@ const compileTemplate = (templateContent: string): TemplatePart[] => {
 
 const htmlPath = (directory: string): string => {
   const parts = directory.split('/');
-  const crumbs: string[] = [];
+  const crumbs: (string | undefined)[] = Array.from({ length: parts.length });
 
   for (let i = 0; i < parts.length; i += 1) {
     const part = parts[i];
 
     if (part) {
       parts[i] = encodeURIComponent(part);
-      crumbs.push(`<a href="${escapeHtml(parts.slice(0, i + 1).join('/'))}">${escapeHtml(part)}</a>`);
+      crumbs[i] = `<a href="${escapeHtml(parts.slice(0, i + 1).join('/'))}">${escapeHtml(part)}</a>`;
     }
   }
 
@@ -111,6 +179,7 @@ const renderHtmlDocument = function* renderHtmlDocument(templateParts: TemplateP
     host: escapeHtml(locals.host),
     'linked-path': htmlPath(locals.directory),
     nonce: locals.nonce,
+    signature: escapeHtml(locals.signature),
     style: locals.style,
   } as const;
 
@@ -148,9 +217,9 @@ const createTextStream = (chunks: Iterable<string>): ReadableStream<Uint8Array> 
   });
 };
 
-const buildHtmlListingHeaders = (nonce: string) => ({
+const buildHtmlListingHeaders = (nonce: string, contentSecurityPolicy = buildCspValue(nonce)) => ({
   'Cache-Control': 'no-cache',
-  'Content-Security-Policy': buildCspValue(nonce),
+  'Content-Security-Policy': contentSecurityPolicy,
   'Content-Type': 'text/html; charset=UTF-8',
   Vary: 'Accept',
   'X-Content-Type-Options': 'nosniff',
@@ -158,7 +227,7 @@ const buildHtmlListingHeaders = (nonce: string) => ({
 
 const createHtmlListingResponse = (templateParts: TemplatePart[], filesMarkup: ReturnType<PresetRenderer>, locals: Locals): Response =>
   new Response(createTextStream(renderHtmlDocument(templateParts, filesMarkup, locals)), {
-    headers: buildHtmlListingHeaders(locals.nonce),
+    headers: buildHtmlListingHeaders(locals.nonce, locals.renderContext.contentSecurityPolicy),
     status: 200,
   });
 
@@ -166,12 +235,20 @@ const resolvePreset = async (preset: ServeIndexPreset, options: ServeIndexOption
   const dir = path.join(currentModuleDirectory, 'templates', preset);
   const mod = await presetLoaders[preset]();
   const stylesheetContent = options.stylesheet ? await readFile(options.stylesheet, 'utf8') : await readOptionalTextFile(path.join(dir, 'style.css'));
+  const resolveAsset = async (assetPath: string) => resolveTemplateAsset(dir, assetPath);
+  const contentSecurityPolicy = preset === 'express' ? expressStyleCspValue : undefined;
 
   if (typeof options.template === 'function') {
     const templateRenderer = options.template;
     return {
+      contentSecurityPolicy,
+      filterFiles: mod.filterFiles,
       render: async (_files, _directory, locals) =>
-        new Response(await templateRenderer(locals), { headers: buildHtmlListingHeaders(locals.nonce), status: 200 }),
+        new Response(await templateRenderer(locals), {
+          headers: buildHtmlListingHeaders(locals.nonce, locals.renderContext.contentSecurityPolicy),
+          status: 200,
+        }),
+      resolveAsset,
       sortFiles: mod.sortFiles,
       stylesheetContent,
     };
@@ -180,10 +257,25 @@ const resolvePreset = async (preset: ServeIndexPreset, options: ServeIndexOption
   const templateContent = options.template ? await readFile(options.template, 'utf8') : await readFile(path.join(dir, 'directory.html'), 'utf8');
   const templateParts = compileTemplate(templateContent);
   return {
+    contentSecurityPolicy,
+    filterFiles: mod.filterFiles,
     render: (files, directory, locals) => createHtmlListingResponse(templateParts, mod.renderFileList(files, directory, locals.renderContext), locals),
+    resolveAsset,
     sortFiles: mod.sortFiles,
     stylesheetContent,
   };
 };
 
-export { buildCspValue, compileTemplate, createHtmlListingResponse, generateNonce, htmlPath, isTemplatePartName, resolvePreset, templatePlaceholderPattern };
+export {
+  buildCspValue,
+  compileTemplate,
+  createHtmlListingResponse,
+  createTemplateAssetUrl,
+  generateNonce,
+  htmlPath,
+  isTemplatePartName,
+  normalizeTemplateAssetPath,
+  resolvePreset,
+  templateAssetQueryKey,
+  templatePlaceholderPattern,
+};

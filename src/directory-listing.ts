@@ -7,7 +7,7 @@ import { accepts } from 'hono/accepts';
 
 import { handleFileResponse } from './file-response.js';
 import { hasHiddenResolvedPath, resolveContainedPath } from './path-security.js';
-import { generateNonce } from './template.js';
+import { createTemplateAssetUrl, generateNonce } from './template.js';
 import { defaultViewName, isValidViewName } from './types.js';
 import type { File, Locals, RenderContext, ResolvedTemplate, ServeIndexFilter, ServeIndexOptions } from './types.js';
 import { getErrorCode } from './utils.js';
@@ -133,6 +133,7 @@ interface DirectoryInspection {
 interface HtmlResponseOptions extends DirectoryInspection {
   directory: string;
   host: string;
+  signature: string;
   showUp: boolean;
   resolvedPreset: ResolvedTemplate;
   renderContext: RenderContext;
@@ -143,6 +144,7 @@ const handleHtmlResponse = async ({
   entries,
   directory,
   host,
+  signature,
   showUp,
   directoryPath,
   rootRealPath,
@@ -152,12 +154,13 @@ const handleHtmlResponse = async ({
   const inspectionOptions: DirectoryInspectionOptions = { allowHidden, directoryPath, includeStats: true, rootRealPath };
   const statted = await inspectDirectoryEntries(entries, inspectionOptions);
   const files = statted.map(({ name, stat }) => ({ name, stat }));
+  const filteredFiles = resolvedPreset.filterFiles ? resolvedPreset.filterFiles(files) : files;
 
   if (showUp) {
-    files.unshift({ name: '..', stat: undefined });
+    filteredFiles.unshift({ name: '..', stat: undefined });
   }
 
-  const sorted = resolvedPreset.sortFiles ? resolvedPreset.sortFiles(files, renderContext.queryString) : files.toSorted(fileSort);
+  const sorted = resolvedPreset.sortFiles ? resolvedPreset.sortFiles(filteredFiles, renderContext.queryString) : filteredFiles.toSorted(fileSort);
   const nonce = generateNonce();
   const locals: Locals = {
     directory,
@@ -166,7 +169,9 @@ const handleHtmlResponse = async ({
     nonce,
     path: directoryPath,
     renderContext,
+    signature,
     style: resolvedPreset.stylesheetContent,
+    templateAssetUrl: renderContext.templateAssetUrl,
   };
 
   return resolvedPreset.render(sorted, directory, locals);
@@ -220,12 +225,28 @@ const filterDirectoryEntries = ({ entries, filterFn, hidden, resolvedPath }: Dir
 
 const normalizeQueryString = (queryString: string): string => queryString.replaceAll(';', '&');
 
-const createRenderContext = (options: ServeIndexOptions, url: URL): RenderContext => {
+const defaultPortForProtocol = (protocol: string): string => (protocol === 'https:' ? '443' : '80');
+
+const buildApacheStyleSignature = (url: URL): string => `Apache Server at ${url.hostname} Port ${url.port || defaultPortForProtocol(url.protocol)}`;
+
+interface RenderContextOptions {
+  directory: string;
+  options: ServeIndexOptions;
+  resolvedPreset: ResolvedTemplate;
+  url: URL;
+}
+
+const createRenderContext = ({ directory, options, resolvedPreset, url }: RenderContextOptions): RenderContext => {
   const queryString = url.search.startsWith('?') ? url.search.slice(1) : url.search;
   const searchParams = new URLSearchParams(normalizeQueryString(queryString));
   const rawView = searchParams.get('view') ?? options.view ?? defaultViewName;
+  const rewrittenDirectory = options.rewriteRequestPath ? (options.rewriteRequestPath(directory) ?? directory) : directory;
+  const mountPrefix = directory.endsWith(rewrittenDirectory) ? directory.slice(0, directory.length - rewrittenDirectory.length) : '';
+  const assetBasePath = mountPrefix ? `${mountPrefix}/` : '/';
   return {
+    contentSecurityPolicy: resolvedPreset.contentSecurityPolicy,
     queryString,
+    templateAssetUrl: (assetPath: string) => createTemplateAssetUrl(assetPath, assetBasePath),
     viewName: isValidViewName(rawView) ? rawView : defaultViewName,
   };
 };
@@ -314,9 +335,10 @@ const handleDirectoryRender = async ({
       ...inspection,
       directory,
       host: url.host,
-      renderContext: createRenderContext(serveIndexOptions, url),
+      renderContext: createRenderContext({ directory, options: serveIndexOptions, resolvedPreset, url }),
       resolvedPreset,
       showUp: resolvedPath !== rootRealPath,
+      signature: buildApacheStyleSignature(url),
     });
   }
 

@@ -5,12 +5,17 @@ export interface File {
   stat: Stats | undefined;
 }
 
+export type TemplateAssetUrlBuilder = (assetPath: string) => string;
+export type PresetFileFilter = (files: File[]) => File[];
+
 export interface RenderContext {
+  contentSecurityPolicy?: string | undefined;
   queryString: string;
+  templateAssetUrl: TemplateAssetUrlBuilder;
   viewName: string;
 }
 
-export type TemplatePartName = 'directory' | 'files' | 'host' | 'linked-path' | 'nonce' | 'style';
+export type TemplatePartName = 'directory' | 'files' | 'host' | 'linked-path' | 'nonce' | 'signature' | 'style';
 
 export type TemplatePart = { type: 'text'; value: string } | { type: 'placeholder'; value: TemplatePartName };
 
@@ -21,7 +26,9 @@ export interface Locals {
   nonce: string;
   path: string;
   renderContext: RenderContext;
+  signature: string;
   style: string;
+  templateAssetUrl: TemplateAssetUrlBuilder;
 }
 
 export const validViewNames = ['tiles', 'details'] as const;
@@ -37,6 +44,7 @@ export type ServeIndexPreset = 'express' | 'nginx' | 'apache';
 export type PresetRenderer = (files: File[], directory: string, context: RenderContext) => Iterable<string> | string;
 
 export interface PresetModule {
+  filterFiles?: PresetFileFilter;
   renderFileList: PresetRenderer;
   sortFiles?: (files: File[], queryString: string) => File[];
 }
@@ -56,7 +64,15 @@ export interface ServeIndexOptions {
 }
 
 export interface ResolvedTemplate {
+  contentSecurityPolicy?: string | undefined;
+  filterFiles?: PresetFileFilter;
   render: (files: File[], directory: string, locals: Locals) => Response | Promise<Response>;
+  resolveAsset: (assetPath: string) => Promise<ResolvedTemplateAsset | undefined>;
   sortFiles?: (files: File[], queryString: string) => File[];
   stylesheetContent: string;
+}
+
+export interface ResolvedTemplateAsset {
+  filePath: string;
+  stats: Stats;
 }
